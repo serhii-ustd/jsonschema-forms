@@ -67,6 +67,11 @@ function generateUiSchema(
           groupRow = [];
         }
       } else {
+        if (groupRow.length > 0) {
+          flushRow(groupRow, elements);
+          groupRow = [];
+        }
+
         primitiveRow.push({ type: "Control", scope: propPath });
 
         if (primitiveRow.length === columns) {
