@@ -121,8 +121,7 @@ const JsonFormsPage = () => {
               data={data}
               renderers={getRenderers()}
               cells={getCells()}
-              onChange={({ data, errors }) => {
-                console.log(errors);
+              onChange={({ data }) => {
                 setData(data);
               }}
             />

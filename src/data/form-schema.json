@@ -1,9 +1,10 @@
 {
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["age"],
   "properties": {
     "profile": {
       "type": "object",
+      "required": ["age"],
       "properties": {
         "firstName": {
           "type": "string",
@@ -29,7 +30,6 @@
     },
     "tags": {
       "type": "array",
-
       "items": {
         "type": "string"
       }
@@ -56,19 +56,25 @@
       "title": "Address for Shipping T-Shirt",
       "type": "object",
       "properties": {
-        "street": {
-          "type": "string"
-        },
-        "streetnumber": {
-          "type": "string"
-        },
-        "postalCode": {
-          "type": "string"
-        },
-        "city": {
-          "type": "string"
-        }
+        "street": { "type": "string" },
+        "streetnumber": { "type": "string" },
+        "postalCode": { "type": "string" },
+        "city": { "type": "string" }
       }
+    }
+  },
+  "if": {
+    "properties": {
+      "committer": { "const": true }
+    },
+    "required": ["committer"]
+  },
+  "then": {
+    "required": ["file"]
+  },
+  "else": {
+    "properties": {
+      "address": false
     }
   }
 }
