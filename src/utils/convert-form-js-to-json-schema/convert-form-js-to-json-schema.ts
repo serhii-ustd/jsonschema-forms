@@ -112,6 +112,12 @@ const DISPLAY_TYPES = new Set([
   "table",
 ]);
 
+/** File picker configuration in form-js */
+interface FilePickerComponent extends FormJsComponent {
+  multiple?: boolean;
+  accept?: string; // e.g. ".pdf,.doc" or "image/*"
+}
+
 /**
  * Convert form-js schema to JSON Schema
  */
@@ -350,6 +356,10 @@ function convertComponent(
       }
       break;
 
+    case "filepicker":
+      applyFilePickerSchema(schema, component as FilePickerComponent);
+      break;
+
     case "expression":
       // Expression can return any type - no type constraint
       break;
@@ -429,6 +439,34 @@ function applyNumberValidation(
 
   if (validate.max !== undefined) {
     schema.maximum = validate.max;
+  }
+}
+
+/**
+ * Apply file picker schema
+ * Uses data-url format for RJSF compatibility
+ * @see https://rjsf-team.github.io/react-jsonschema-form/docs/usage/widgets/#file-widgets
+ */
+function applyFilePickerSchema(
+  schema: JSONSchema,
+  component: FilePickerComponent,
+): void {
+  if (component.multiple) {
+    // Multiple files - array of data URLs
+    schema.type = "array";
+    schema.items = {
+      type: "string",
+      format: "data-url",
+    };
+  } else {
+    // Single file - data URL string
+    schema.type = "string";
+    schema.format = "data-url";
+  }
+
+  // Store accept pattern as extension for UI libraries
+  if (component.accept) {
+    schema["x-accept"] = component.accept;
   }
 }
 

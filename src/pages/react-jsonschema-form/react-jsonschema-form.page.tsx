@@ -52,6 +52,7 @@ const ReactJsonschemaFormPage = () => {
           <Select
             labelId="columns-label"
             value={columns}
+            variant="standard"
             onChange={handleColumnsChange}
           >
             {[1, 2, 3, 4, 5].map((n) => (

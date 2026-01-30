@@ -55,6 +55,10 @@ export interface FormJsComponent {
   text?: string;
   content?: string;
 
+  // File picker
+  multiple?: boolean;
+  accept?: string; // e.g. ".pdf,.doc" or "image/*"
+
   // Group/DynamicList
   components?: FormJsComponent[];
   path?: string;

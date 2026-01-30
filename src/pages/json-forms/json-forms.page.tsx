@@ -71,6 +71,7 @@ const JsonFormsPage = () => {
             labelId="columns-label"
             value={columns}
             label="Columns"
+            variant="standard"
             onChange={handleColumnsChange}
           >
             {[1, 2, 3, 4, 5].map((n) => (
@@ -87,6 +88,7 @@ const JsonFormsPage = () => {
             labelId="renderer-label"
             value={rendererType}
             label="Renderer"
+            variant="standard"
             onChange={handleRendererChange}
           >
             <MenuItem value="mui">Material UI</MenuItem>
