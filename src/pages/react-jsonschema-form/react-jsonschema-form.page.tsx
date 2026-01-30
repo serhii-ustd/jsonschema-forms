@@ -15,7 +15,7 @@ import schema from "@/data/form-schema.json";
 import type { JSONSchema7 } from "json-schema";
 import type { IChangeEvent } from "@rjsf/core";
 import { generateUiSchema } from "./utils/generate-ui-schema-rjsf";
-import { GridObjectFieldTemplate } from "./templates/GridObjectFieldTemplate";
+import { GridObjectFieldTemplate } from "./templates/grid-object-field-template";
 import JsonView from "@/components/json-view/json-view";
 
 const ReactJsonschemaFormPage = () => {

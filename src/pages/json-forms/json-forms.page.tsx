@@ -17,7 +17,7 @@ import JsonView from "@/components/json-view/json-view";
 import schema from "@/data/form-schema.json";
 import { customRenderers as shadcnRenderers } from "@/pages/json-forms/renders/custom-renders/custom-renders";
 import { tailwindRenderers } from "./renders/tailwind-renderers/tailwind-renderers";
-import { generateUiSchema } from "@/pages/json-forms/utils/ generate-ui-schema";
+import { generateUiSchema } from "@/pages/json-forms/utils/generate-ui-schema";
 
 type RendererType = "mui" | "shadcn" | "tailwind";
 

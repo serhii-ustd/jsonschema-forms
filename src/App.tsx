@@ -18,12 +18,14 @@ import {
 } from "@mui/material";
 import MenuIcon from "@mui/icons-material/Menu";
 import JsonFormsPage from "@/pages/json-forms/json-forms.page";
+import FormJsPage from "@/pages/form-js/form-js.page";
 
 const drawerWidth = 240;
 
 const navItems = [
   { label: "JSONForms", path: "/" },
   { label: "react-jsonschema-form", path: "/react-jsonschema-form" },
+  { label: "FormJs", path: "/form-js" },
 ];
 
 function App() {
@@ -121,6 +123,8 @@ function App() {
             path="/react-jsonschema-form"
             element={<ReactJsonschemaForm />}
           />
+
+          <Route path="/form-js" element={<FormJsPage />} />
         </Routes>
       </Box>
     </Box>
