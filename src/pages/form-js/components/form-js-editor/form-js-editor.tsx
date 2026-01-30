@@ -27,26 +27,9 @@ import {
   type JSONSchema,
   type FormJsSchema,
 } from "@/utils/convert-form-js-to-json-schema";
+import { petFoodOrderSchema } from "@/pages/form-js/data";
 
 // Initial schema for the editor
-const defaultSchema: FormJsSchema = {
-  type: "default",
-  id: "Form_1",
-  components: [
-    {
-      type: "text",
-      text: "# New Form\n\nStart editing your form by adding components.",
-    },
-    {
-      key: "name",
-      label: "Name",
-      type: "textfield",
-      validate: {
-        required: true,
-      },
-    },
-  ],
-};
 
 const FormJsEditor: React.FC = () => {
   const editorContainerRef = useRef<HTMLDivElement>(null);
@@ -78,7 +61,7 @@ const FormJsEditor: React.FC = () => {
           container: editorContainerRef.current,
         });
 
-        await formEditor.importSchema(defaultSchema);
+        await formEditor.importSchema(petFoodOrderSchema);
 
         if (!mounted) {
           formEditor.destroy();

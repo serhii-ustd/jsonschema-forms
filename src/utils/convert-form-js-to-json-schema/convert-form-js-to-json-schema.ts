@@ -5,7 +5,7 @@
  * Compatible with JSONSchema7 from 'json-schema' package
  */
 
-import type { FormJsSchema, FormJsComponent } from "./types";
+import type { FormJsComponent, FormJsSchema } from "./types";
 
 // Use JSONSchema7 compatible type names
 export type JSONSchema7TypeName =
@@ -90,6 +90,8 @@ export interface ConverterOptions {
   draft?: "draft-04" | "draft-06" | "draft-07" | "2019-09" | "2020-12";
   /** Treat number with serializeToString as string (default: false) */
   stringifyNumbers?: boolean;
+  /** Convert conditionals to if/then/else (default: true) */
+  convertConditionals?: boolean;
 }
 
 const SCHEMA_URLS: Record<string, string> = {
@@ -118,6 +120,20 @@ interface FilePickerComponent extends FormJsComponent {
   accept?: string; // e.g. ".pdf,.doc" or "image/*"
 }
 
+/** Parsed FEEL condition */
+interface ParsedCondition {
+  field: string;
+  operator: "=" | "!=" | ">" | "<" | ">=" | "<=";
+  value: string | number | boolean;
+}
+
+/** Conditional field info */
+interface ConditionalField {
+  component: FormJsComponent;
+  condition: ParsedCondition;
+  showWhen: boolean; // true = show when condition is true, false = hide when condition is true
+}
+
 /**
  * Convert form-js schema to JSON Schema
  */
@@ -125,12 +141,24 @@ export function convertToJSONSchema(
   formSchema: FormJsSchema,
   options: ConverterOptions = {},
 ): JSONSchema {
-  const { draft = "draft-07", includeExtensions = false } = options;
+  const {
+    draft = "draft-07",
+    includeExtensions = false,
+    convertConditionals = true,
+  } = options;
 
   const properties: Record<string, JSONSchema> = {};
   const required: string[] = [];
+  const conditionalFields: ConditionalField[] = [];
 
-  processComponents(formSchema.components, properties, required, options);
+  // Process all components, collecting conditional ones separately
+  processComponentsWithConditionals(
+    formSchema.components,
+    properties,
+    required,
+    conditionalFields,
+    options,
+  );
 
   const schema: JSONSchema = {
     $schema: SCHEMA_URLS[draft],
@@ -142,6 +170,14 @@ export function convertToJSONSchema(
     schema.required = required;
   }
 
+  // Build if/then/else for conditional fields
+  if (convertConditionals && conditionalFields.length > 0) {
+    const allOf = buildConditionalSchema(conditionalFields, options);
+    if (allOf.length > 0) {
+      schema.allOf = allOf;
+    }
+  }
+
   if (includeExtensions && formSchema.id) {
     schema["x-formjs-id"] = formSchema.id;
     schema["x-formjs-schemaVersion"] = formSchema.schemaVersion;
@@ -151,7 +187,232 @@ export function convertToJSONSchema(
 }
 
 /**
- * Process components array
+ * Process components array, collecting conditional fields separately
+ */
+function processComponentsWithConditionals(
+  components: FormJsComponent[],
+  properties: Record<string, JSONSchema>,
+  required: string[],
+  conditionalFields: ConditionalField[],
+  options: ConverterOptions,
+): void {
+  for (const component of components) {
+    processComponentWithConditionals(
+      component,
+      properties,
+      required,
+      conditionalFields,
+      options,
+    );
+  }
+}
+
+/**
+ * Process single component, handling conditionals
+ */
+function processComponentWithConditionals(
+  component: FormJsComponent,
+  properties: Record<string, JSONSchema>,
+  required: string[],
+  conditionalFields: ConditionalField[],
+  options: ConverterOptions,
+): void {
+  const { type, key } = component;
+
+  // Skip display-only components
+  if (DISPLAY_TYPES.has(type)) {
+    return;
+  }
+
+  // Handle group
+  if (type === "group") {
+    processGroup(component, properties, required, options);
+    return;
+  }
+
+  // Handle dynamic list
+  if (type === "dynamiclist") {
+    processDynamicList(component, properties, required, options);
+    return;
+  }
+
+  // Skip components without key
+  if (!key) {
+    return;
+  }
+
+  // Check for conditional
+  const conditional = component.conditional;
+  if (
+    options.convertConditionals !== false &&
+    conditional &&
+    (conditional.hide || conditional.show)
+  ) {
+    const parsed = parseFEELCondition(
+      conditional.hide || conditional.show || "",
+    );
+    if (parsed) {
+      conditionalFields.push({
+        component,
+        condition: parsed,
+        showWhen: !conditional.hide, // hide="=x" means show when NOT x
+      });
+
+      // Still add to properties (for schema completeness) but don't add to required
+
+      properties[key] = convertComponent(component, options);
+      return;
+    }
+  }
+
+  // Non-conditional field
+
+  properties[key] = convertComponent(component, options);
+
+  if (component.validate?.required) {
+    required.push(key);
+  }
+}
+
+/**
+ * Parse FEEL expression to condition
+ * Supports: =field = 'value', =field != 'value', =field = 123, =field = true
+ */
+function parseFEELCondition(feel: string): ParsedCondition | null {
+  if (!feel || !feel.startsWith("=")) {
+    return null;
+  }
+
+  // Remove leading '='
+  const expr = feel.substring(1).trim();
+
+  // Match patterns like: field != 'value' or field = "value" or field = 123
+  const patterns = [
+    // field != 'value' or field != "value"
+    /^(\w+)\s*!=\s*['"](.+)['"]$/,
+    // field = 'value' or field = "value"
+    /^(\w+)\s*=\s*['"](.+)['"]$/,
+    // field != number
+    /^(\w+)\s*!=\s*(-?\d+(?:\.\d+)?)$/,
+    // field = number
+    /^(\w+)\s*=\s*(-?\d+(?:\.\d+)?)$/,
+    // field != true/false
+    /^(\w+)\s*!=\s*(true|false)$/i,
+    // field = true/false
+    /^(\w+)\s*=\s*(true|false)$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = expr.match(pattern);
+    if (match) {
+      const [, field, rawValue] = match;
+      const isNotEqual = expr.includes("!=");
+
+      // Parse value
+      let value: string | number | boolean = rawValue;
+      if (/^-?\d+$/.test(rawValue)) {
+        value = parseInt(rawValue, 10);
+      } else if (/^-?\d+\.\d+$/.test(rawValue)) {
+        value = parseFloat(rawValue);
+      } else if (rawValue.toLowerCase() === "true") {
+        value = true;
+      } else if (rawValue.toLowerCase() === "false") {
+        value = false;
+      }
+
+      return {
+        field,
+        operator: isNotEqual ? "!=" : "=",
+        value,
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Build allOf with if/then blocks from conditional fields
+ */
+function buildConditionalSchema(
+  conditionalFields: ConditionalField[],
+  options: ConverterOptions,
+): JSONSchema[] {
+  // Group fields by condition (field + value)
+  const groups = new Map<string, ConditionalField[]>();
+
+  for (const cf of conditionalFields) {
+    // For hide="=field != 'value'", show when field = 'value'
+    // For hide="=field = 'value'", show when field != 'value' (less common, skip for now)
+    const { condition, showWhen } = cf;
+
+    let effectiveValue: string | number | boolean;
+    const effectiveField = condition.field;
+
+    if (condition.operator === "!=" && !showWhen) {
+      // hide="=field != 'value'" → show when field = 'value'
+      effectiveValue = condition.value;
+    } else if (condition.operator === "=" && !showWhen) {
+      // hide="=field = 'value'" → show when field != 'value' (complex, skip)
+      continue;
+    } else if (condition.operator === "=" && showWhen) {
+      // show="=field = 'value'" → show when field = 'value'
+      effectiveValue = condition.value;
+    } else {
+      continue;
+    }
+
+    const key = `${effectiveField}:${JSON.stringify(effectiveValue)}`;
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key)!.push(cf);
+  }
+
+  // Build if/then for each group
+  const allOf: JSONSchema[] = [];
+
+  for (const [key, fields] of groups) {
+    const [fieldName, valueJson] = key.split(":");
+    const value = JSON.parse(valueJson);
+
+    const thenProperties: Record<string, JSONSchema> = {};
+    const thenRequired: string[] = [];
+
+    for (const cf of fields) {
+      const comp = cf.component;
+      if (!comp.key) continue;
+
+      thenProperties[comp.key] = convertComponent(comp, options);
+
+      if (comp.validate?.required) {
+        thenRequired.push(comp.key);
+      }
+    }
+
+    const ifThen: JSONSchema = {
+      if: {
+        properties: {
+          [fieldName]: { const: value },
+        },
+      },
+      then: {
+        properties: thenProperties,
+      },
+    };
+
+    if (thenRequired.length > 0) {
+      ifThen.then!.required = thenRequired;
+    }
+
+    allOf.push(ifThen);
+  }
+
+  return allOf;
+}
+
+/**
+ * Process components array (legacy, without conditionals)
  */
 function processComponents(
   components: FormJsComponent[],
@@ -198,8 +459,8 @@ function processComponent(
   }
 
   // Convert to JSON Schema property
-  const schema = convertComponent(component, options);
-  properties[key] = schema;
+
+  properties[key] = convertComponent(component, options);
 
   // Add to required if needed
   if (component.validate?.required) {

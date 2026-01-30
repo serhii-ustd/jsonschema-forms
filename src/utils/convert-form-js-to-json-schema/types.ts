@@ -24,6 +24,7 @@ export interface FormJsLayout {
 
 export interface FormJsConditional {
   hide?: string;
+  show?: string;
 }
 
 export interface FormJsComponent {
