@@ -13,11 +13,13 @@ import {
 } from "@jsonforms/material-renderers";
 import { vanillaCells } from "@jsonforms/vanilla-renderers";
 import { JsonForms } from "@jsonforms/react";
-import JsonView from "@/components/json-view/json-view";
+import JsonEditor from "@/components/json-editor/json-editor";
 import schema from "@/data/form-schema.json";
 import { customRenderers as shadcnRenderers } from "@/pages/json-forms/renders/custom-renders/custom-renders";
 import { tailwindRenderers } from "./renders/tailwind-renderers/tailwind-renderers";
 import { generateUiSchema } from "@/pages/json-forms/utils/generate-ui-schema";
+import type { JSONSchema } from "@/types/json";
+import type { JsonSchema } from "@jsonforms/core";
 
 type RendererType = "mui" | "shadcn" | "tailwind";
 
@@ -25,8 +27,11 @@ const JsonFormsPage = () => {
   const [data, setData] = useState({});
   const [columns, setColumns] = useState("2");
   const [rendererType, setRendererType] = useState<RendererType>("mui");
+  const [jsonSchema, setJsonSchema] = useState<JSONSchema>(
+    schema as JSONSchema,
+  );
 
-  const uischema = generateUiSchema(schema, {
+  const uischema = generateUiSchema(jsonSchema, {
     columns: Number(columns),
   });
 
@@ -112,11 +117,20 @@ const JsonFormsPage = () => {
         </Box>
       </Box>
 
-      <Grid container spacing={2} flexWrap="wrap">
+      <Grid container spacing={4} flexWrap="wrap">
+        <Grid size={4} minWidth={300}>
+          <Paper>
+            <JsonEditor
+              data={jsonSchema}
+              onChange={(data) => setJsonSchema(data)}
+            />
+          </Paper>
+        </Grid>
+
         <Grid size={8}>
           <Paper sx={{ p: 2 }}>
             <JsonForms
-              schema={schema}
+              schema={jsonSchema as JsonSchema}
               uischema={uischema}
               data={data}
               renderers={getRenderers()}
@@ -125,12 +139,6 @@ const JsonFormsPage = () => {
                 setData(data);
               }}
             />
-          </Paper>
-        </Grid>
-
-        <Grid size={4} minWidth={300}>
-          <Paper>
-            <JsonView json={data} />
           </Paper>
         </Grid>
       </Grid>

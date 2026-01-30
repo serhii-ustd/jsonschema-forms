@@ -1,22 +1,22 @@
 import type {
-  JsonSchema,
   UISchemaElement,
   ControlElement,
   Layout,
   GroupLayout,
 } from "@jsonforms/core";
+import type { JSONSchema } from "@/types/json";
 
 interface GeneratorConfig {
   columns?: number;
 }
 
 function generateUiSchema(
-  schema: JsonSchema,
+  schema: JSONSchema,
   config: GeneratorConfig = {},
 ): Layout {
   const { columns = 2 } = config;
 
-  const generate = (schema: JsonSchema, basePath: string): Layout => {
+  const generate = (schema: JSONSchema, basePath: string): Layout => {
     if (!schema.properties) {
       return { type: "VerticalLayout", elements: [] };
     }
@@ -36,9 +36,9 @@ function generateUiSchema(
     };
 
     for (const [propName, propSchema] of Object.entries(schema.properties)) {
-      const s = propSchema as JsonSchema;
+      const s = propSchema as JSONSchema;
       const propPath = `${basePath}/${propName}`;
-      const items = s.items as JsonSchema | undefined;
+      const items = s.items as JSONSchema | undefined;
       const isNestedObject =
         s.type === "object" || (s.type === "array" && items?.type === "object");
 

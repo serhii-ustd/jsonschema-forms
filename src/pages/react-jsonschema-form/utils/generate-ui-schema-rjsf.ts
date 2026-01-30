@@ -1,4 +1,4 @@
-import type { JSONSchema7 } from "json-schema";
+import type { JSONSchema } from "@/types/json";
 
 interface ResponsiveColumns {
   xs?: number;
@@ -37,12 +37,12 @@ function normalizeColumns(
 }
 
 function generateUiSchema(
-  schema: JSONSchema7,
+  schema: JSONSchema,
   config: GeneratorConfig = {},
 ): GridUiSchema {
   const responsiveColumns = normalizeColumns(config.columns);
 
-  const generate = (schema: JSONSchema7): GridUiSchema => {
+  const generate = (schema: JSONSchema): GridUiSchema => {
     if (!schema.properties) {
       return {};
     }
@@ -56,8 +56,8 @@ function generateUiSchema(
     );
 
     for (const [propName, propSchema] of Object.entries(schema.properties)) {
-      const s = propSchema as JSONSchema7;
-      const items = s.items as JSONSchema7 | undefined;
+      const s = propSchema as JSONSchema;
+      const items = s.items as JSONSchema | undefined;
       const isNestedObject =
         s.type === "object" || (s.type === "array" && items?.type === "object");
 
