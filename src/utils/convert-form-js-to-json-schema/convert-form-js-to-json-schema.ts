@@ -1,487 +1,513 @@
-// ============================================================================
-// Form.js to JSON Schema Converter
-// Converts @bpmn-io/form-js schemas to JSON Schema Draft 7
-// ============================================================================
+/**
+ * Form-js to JSON Schema Converter
+ *
+ * Converts @bpmn-io/form-js schemas to JSON Schema (draft-07) format
+ * Compatible with JSONSchema7 from 'json-schema' package
+ */
 
-import type { JSONSchema7, JSONSchema7Definition } from "json-schema";
-import type { FormSchema, FormComponent } from "./form-js.type";
+import type { FormJsSchema, FormJsComponent } from "./types";
+
+// Use JSONSchema7 compatible type names
+export type JSONSchema7TypeName =
+  | "string"
+  | "number"
+  | "integer"
+  | "boolean"
+  | "object"
+  | "array"
+  | "null";
+
+/** JSON Schema Draft-07 compatible type */
+export interface JSONSchema {
+  $schema?: string;
+  $id?: string;
+  $ref?: string;
+  $comment?: string;
+
+  title?: string;
+  description?: string;
+  default?: unknown;
+  readOnly?: boolean;
+  writeOnly?: boolean;
+  examples?: unknown[];
+
+  type?: JSONSchema7TypeName | JSONSchema7TypeName[];
+  enum?: unknown[];
+  const?: unknown;
+
+  // String
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  format?: string;
+
+  // Number
+  minimum?: number;
+  maximum?: number;
+  exclusiveMinimum?: number;
+  exclusiveMaximum?: number;
+  multipleOf?: number;
+
+  // Array
+  items?: JSONSchema | JSONSchema[];
+  additionalItems?: JSONSchema | boolean;
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
+  contains?: JSONSchema;
+
+  // Object
+  properties?: Record<string, JSONSchema>;
+  patternProperties?: Record<string, JSONSchema>;
+  additionalProperties?: JSONSchema | boolean;
+  required?: string[];
+  propertyNames?: JSONSchema;
+  minProperties?: number;
+  maxProperties?: number;
+  dependencies?: Record<string, JSONSchema | string[]>;
+
+  // Conditional
+  if?: JSONSchema;
+  then?: JSONSchema;
+  else?: JSONSchema;
+  allOf?: JSONSchema[];
+  anyOf?: JSONSchema[];
+  oneOf?: JSONSchema[];
+  not?: JSONSchema;
+
+  // Definitions
+  definitions?: Record<string, JSONSchema>;
+
+  // Extensions (form-js specific)
+  [key: `x-${string}`]: unknown;
+}
+
+/** Converter options */
+export interface ConverterOptions {
+  /** Include x-formjs-* extensions (default: false) */
+  includeExtensions?: boolean;
+  /** JSON Schema draft version (default: 'draft-07') */
+  draft?: "draft-04" | "draft-06" | "draft-07" | "2019-09" | "2020-12";
+  /** Treat number with serializeToString as string (default: false) */
+  stringifyNumbers?: boolean;
+}
+
+const SCHEMA_URLS: Record<string, string> = {
+  "draft-04": "http://json-schema.org/draft-04/schema#",
+  "draft-06": "http://json-schema.org/draft-06/schema#",
+  "draft-07": "http://json-schema.org/draft-07/schema#",
+  "2019-09": "https://json-schema.org/draft/2019-09/schema",
+  "2020-12": "https://json-schema.org/draft/2020-12/schema",
+};
+
+/** Display-only types (no data) */
+const DISPLAY_TYPES = new Set([
+  "text",
+  "html",
+  "image",
+  "button",
+  "spacer",
+  "separator",
+  "iframe",
+  "table",
+]);
 
 /**
- * Converts a Form.js schema to JSON Schema (Draft 7)
- *
- * @param formSchema - The Form.js schema to convert
- * @returns A valid JSON Schema object
+ * Convert form-js schema to JSON Schema
  */
-export function convertFormJsToJsonSchema(formSchema: FormSchema): JSONSchema7 {
-  const schema: JSONSchema7 = {
-    $schema: "http://json-schema.org/draft-07/schema#",
+export function convertToJSONSchema(
+  formSchema: FormJsSchema,
+  options: ConverterOptions = {},
+): JSONSchema {
+  const { draft = "draft-07", includeExtensions = false } = options;
+
+  const properties: Record<string, JSONSchema> = {};
+  const required: string[] = [];
+
+  processComponents(formSchema.components, properties, required, options);
+
+  const schema: JSONSchema = {
+    $schema: SCHEMA_URLS[draft],
     type: "object",
-    title: formSchema.id || "Form",
-    properties: {},
-    required: [],
+    properties,
   };
 
-  // Add conditional rendering rules if any components have them
-  const conditionalComponents: Record<string, any> = {};
-
-  for (const component of formSchema.components) {
-    const result = convertComponent(component);
-
-    if (!result) continue;
-
-    const { propertySchema, isRequired, conditionalRules } = result;
-
-    if (component.key) {
-      schema.properties![component.key] = propertySchema;
-
-      if (isRequired) {
-        schema.required!.push(component.key);
-      }
-
-      if (conditionalRules) {
-        conditionalComponents[component.key] = conditionalRules;
-      }
-    }
+  if (required.length > 0) {
+    schema.required = required;
   }
 
-  // Clean up empty required array
-  if (schema.required?.length === 0) {
-    delete schema.required;
-  }
-
-  // Add conditional rendering as x-conditional extension
-  if (Object.keys(conditionalComponents).length > 0) {
-    schema["x-conditionals"] = conditionalComponents;
+  if (includeExtensions && formSchema.id) {
+    schema["x-formjs-id"] = formSchema.id;
+    schema["x-formjs-schemaVersion"] = formSchema.schemaVersion;
   }
 
   return schema;
 }
 
 /**
- * Conversion result for a single component
+ * Process components array
  */
-interface ConversionResult {
-  propertySchema: JSONSchema7Definition;
-  isRequired: boolean;
-  conditionalRules?: {
-    hide?: string;
-    show?: string;
-  };
+function processComponents(
+  components: FormJsComponent[],
+  properties: Record<string, JSONSchema>,
+  required: string[],
+  options: ConverterOptions,
+): void {
+  for (const component of components) {
+    processComponent(component, properties, required, options);
+  }
 }
 
 /**
- * Converts a single Form.js component to a JSON Schema property
+ * Process single component
  */
-function convertComponent(component: FormComponent): ConversionResult | null {
-  // Skip components without keys (display-only components)
-  if (!component.key) {
-    // These components don't produce data, so we skip them in JSON Schema
-    if (
-      component.type === "text" ||
-      component.type === "image" ||
-      component.type === "spacer" ||
-      component.type === "separator" ||
-      component.type === "button" ||
-      component.type === "html" ||
-      component.type === "iframe"
-    ) {
-      return null;
-    }
+function processComponent(
+  component: FormJsComponent,
+  properties: Record<string, JSONSchema>,
+  required: string[],
+  options: ConverterOptions,
+): void {
+  const { type, key } = component;
+
+  // Skip display-only components
+  if (DISPLAY_TYPES.has(type)) {
+    return;
   }
 
-  const isRequired = component.validate?.required ?? false;
-  const conditionalRules = component.conditional;
+  // Handle group
+  if (type === "group") {
+    processGroup(component, properties, required, options);
+    return;
+  }
 
-  let propertySchema: JSONSchema7Definition;
+  // Handle dynamic list
+  if (type === "dynamiclist") {
+    processDynamicList(component, properties, required, options);
+    return;
+  }
+
+  // Skip components without key
+  if (!key) {
+    return;
+  }
+
+  // Convert to JSON Schema property
+  const schema = convertComponent(component, options);
+  properties[key] = schema;
+
+  // Add to required if needed
+  if (component.validate?.required) {
+    required.push(key);
+  }
+}
+
+/**
+ * Process group component
+ */
+function processGroup(
+  component: FormJsComponent,
+  properties: Record<string, JSONSchema>,
+  required: string[],
+  options: ConverterOptions,
+): void {
+  const groupKey = component.key || component.path;
+  const nestedComponents = component.components || [];
+
+  if (groupKey) {
+    const nestedProps: Record<string, JSONSchema> = {};
+    const nestedRequired: string[] = [];
+
+    processComponents(nestedComponents, nestedProps, nestedRequired, options);
+
+    const groupSchema: JSONSchema = {
+      type: "object",
+      properties: nestedProps,
+    };
+
+    if (nestedRequired.length > 0) {
+      groupSchema.required = nestedRequired;
+    }
+
+    if (component.label) {
+      groupSchema.title = component.label;
+    }
+
+    if (options.includeExtensions) {
+      groupSchema["x-formjs-type"] = "group";
+    }
+
+    properties[groupKey] = groupSchema;
+  } else {
+    processComponents(nestedComponents, properties, required, options);
+  }
+}
+
+/**
+ * Process dynamic list component
+ */
+function processDynamicList(
+  component: FormJsComponent,
+  properties: Record<string, JSONSchema>,
+  required: string[],
+  options: ConverterOptions,
+): void {
+  const listKey = component.key || component.path;
+
+  if (!listKey) {
+    return;
+  }
+
+  const nestedComponents = component.components || [];
+  const itemProps: Record<string, JSONSchema> = {};
+  const itemRequired: string[] = [];
+
+  processComponents(nestedComponents, itemProps, itemRequired, options);
+
+  const itemSchema: JSONSchema = {
+    type: "object",
+    properties: itemProps,
+  };
+
+  if (itemRequired.length > 0) {
+    itemSchema.required = itemRequired;
+  }
+
+  const listSchema: JSONSchema = {
+    type: "array",
+    items: itemSchema,
+  };
+
+  if (component.defaultRepetitions) {
+    listSchema.minItems = component.defaultRepetitions;
+  }
+
+  if (component.label) {
+    listSchema.title = component.label;
+  }
+
+  if (options.includeExtensions) {
+    listSchema["x-formjs-type"] = "dynamiclist";
+  }
+
+  properties[listKey] = listSchema;
+
+  if (component.validate?.required) {
+    required.push(listKey);
+  }
+}
+
+/**
+ * Convert single component to JSON Schema
+ */
+function convertComponent(
+  component: FormJsComponent,
+  options: ConverterOptions,
+): JSONSchema {
+  const schema: JSONSchema = {};
 
   switch (component.type) {
-    // ========================================================================
-    // Input Fields
-    // ========================================================================
-
     case "textfield":
-    case "textarea": {
-      propertySchema = {
-        type: "string",
-        title: component.label,
-        description: component.description,
-        default: component.defaultValue,
-      };
-
-      // Add validation rules
-      if (component.validate) {
-        if (component.validate.minLength !== undefined) {
-          (propertySchema as JSONSchema7).minLength = component.validate.minLength;
-        }
-        if (component.validate.maxLength !== undefined) {
-          (propertySchema as JSONSchema7).maxLength = component.validate.maxLength;
-        }
-        if (component.validate.pattern) {
-          (propertySchema as JSONSchema7).pattern = component.validate.pattern;
-        }
-      }
-
-      // Add appearance hints as extensions
-      if ("appearance" in component && component.appearance) {
-        (propertySchema as JSONSchema7)["x-appearance"] = component.appearance;
-      }
-
-      // Add textarea-specific properties
-      if (component.type === "textarea" && "rows" in component) {
-        (propertySchema as JSONSchema7)["x-rows"] = component.rows;
-      }
-
+    case "textarea":
+      schema.type = "string";
+      applyStringValidation(schema, component);
       break;
-    }
 
-    case "number": {
-      propertySchema = {
-        type: component.serializeToString ? "string" : "number",
-        title: component.label,
-        description: component.description,
-        default: component.defaultValue,
-      };
-
-      // Add validation rules
-      if (component.validate) {
-        if (component.validate.min !== undefined) {
-          (propertySchema as JSONSchema7).minimum = component.validate.min;
-        }
-        if (component.validate.max !== undefined) {
-          (propertySchema as JSONSchema7).maximum = component.validate.max;
-        }
+    case "number":
+      if (options.stringifyNumbers && component.serializeToString) {
+        schema.type = "string";
+        schema.pattern = "^-?\\d+(\\.\\d+)?$";
+      } else {
+        schema.type = component.decimalDigits === 0 ? "integer" : "number";
+        applyNumberValidation(schema, component);
       }
-
-      // Add number-specific extensions
-      const extensions: Record<string, any> = {};
-      if (component.decimalDigits !== undefined) {
-        extensions.decimalDigits = component.decimalDigits;
-      }
-      if (component.increment) {
-        extensions.increment = component.increment;
-      }
-      if (component.appearance) {
-        extensions.appearance = component.appearance;
-      }
-      if (Object.keys(extensions).length > 0) {
-        (propertySchema as JSONSchema7)["x-number"] = extensions;
-      }
-
       break;
-    }
 
-    case "checkbox": {
-      propertySchema = {
-        type: "boolean",
-        title: component.label,
-        description: component.description,
-        default: component.defaultValue,
-      };
+    case "checkbox":
+      schema.type = "boolean";
       break;
-    }
-
-    // ========================================================================
-    // Selection Fields
-    // ========================================================================
 
     case "radio":
-    case "select": {
-      propertySchema = {
-        type: "string",
-        title: component.label,
-        description: component.description,
-        default: component.defaultValue,
-      };
-
-      // Add enum values if statically defined
-      if (component.values && component.values.length > 0) {
-        (propertySchema as JSONSchema7).enum = component.values.map((v) => v.value);
-
-        // Add labels as extension
-        const enumLabels: Record<string, string> = {};
-        component.values.forEach((v) => {
-          enumLabels[v.value] = v.label;
-        });
-        (propertySchema as JSONSchema7)["x-enumLabels"] = enumLabels;
-      }
-
-      // Add dynamic values reference
-      if (component.valuesKey) {
-        (propertySchema as JSONSchema7)["x-valuesKey"] = component.valuesKey;
-      }
-      if (component.valuesExpression) {
-        (propertySchema as JSONSchema7)["x-valuesExpression"] = component.valuesExpression;
-      }
-
-      // Add select-specific properties
-      if (component.type === "select" && component.searchable !== undefined) {
-        (propertySchema as JSONSchema7)["x-searchable"] = component.searchable;
-      }
-
+    case "select":
+      applyEnumSchema(schema, component, false);
       break;
-    }
 
     case "checklist":
-    case "taglist": {
-      propertySchema = {
-        type: "array",
-        title: component.label,
-        description: component.description,
-        default: component.defaultValue,
-        items: {
-          type: "string",
-        },
-        uniqueItems: true,
-      };
-
-      // Add enum values if statically defined
-      if (component.values && component.values.length > 0) {
-        ((propertySchema as JSONSchema7).items as JSONSchema7).enum = component.values.map(
-          (v) => v.value,
-        );
-
-        // Add labels as extension
-        const enumLabels: Record<string, string> = {};
-        component.values.forEach((v) => {
-          enumLabels[v.value] = v.label;
-        });
-        (propertySchema as JSONSchema7)["x-enumLabels"] = enumLabels;
-      }
-
-      // Add dynamic values reference
-      if (component.valuesKey) {
-        (propertySchema as JSONSchema7)["x-valuesKey"] = component.valuesKey;
-      }
-      if (component.valuesExpression) {
-        (propertySchema as JSONSchema7)["x-valuesExpression"] = component.valuesExpression;
-      }
-
+    case "taglist":
+      applyEnumSchema(schema, component, true);
       break;
-    }
 
-    // ========================================================================
-    // Date/Time
-    // ========================================================================
-
-    case "datetime": {
-      const subtype = component.subtype || "datetime";
-
-      propertySchema = {
-        type: "string",
-        title: component.label,
-        description: component.description,
-        default: component.defaultValue,
-      };
-
-      // Set format based on subtype
-      if (subtype === "date") {
-        (propertySchema as JSONSchema7).format = "date";
-      } else if (subtype === "time") {
-        (propertySchema as JSONSchema7).format = "time";
-      } else {
-        (propertySchema as JSONSchema7).format = "date-time";
+    case "datetime":
+      schema.type = "string";
+      switch (component.subtype) {
+        case "date":
+          schema.format = "date";
+          break;
+        case "time":
+          schema.format = "time";
+          break;
+        default:
+          schema.format = "date-time";
       }
-
-      // Add datetime-specific extensions
-      const extensions: Record<string, any> = {
-        subtype,
-      };
-      if (component.timeSerializingFormat) {
-        extensions.timeSerializingFormat = component.timeSerializingFormat;
-      }
-      if (component.timeInterval) {
-        extensions.timeInterval = component.timeInterval;
-      }
-      if (component.use24h !== undefined) {
-        extensions.use24h = component.use24h;
-      }
-      if (component.disallowPassedDates) {
-        extensions.disallowPassedDates = component.disallowPassedDates;
-      }
-      (propertySchema as JSONSchema7)["x-datetime"] = extensions;
-
       break;
-    }
 
-    // ========================================================================
-    // File Upload
-    // ========================================================================
-
-    case "filepicker": {
-      if (component.multiple) {
-        propertySchema = {
-          type: "array",
-          title: component.label,
-          description: component.description,
-          items: {
-            type: "string",
-            format: "uri",
-          },
-        };
-      } else {
-        propertySchema = {
-          type: "string",
-          title: component.label,
-          description: component.description,
-          format: "uri",
-        };
-      }
-
-      // Add file-specific extensions
-      if (component.accept) {
-        (propertySchema as JSONSchema7)["x-accept"] = component.accept;
-      }
-
+    case "expression":
+      // Expression can return any type - no type constraint
       break;
-    }
-
-    // ========================================================================
-    // Complex Structures
-    // ========================================================================
-
-    case "group": {
-      // Groups create nested objects
-      if (!component.path && !component.components) {
-        return null;
-      }
-
-      propertySchema = {
-        type: "object",
-        title: component.label,
-        description: component.description,
-        properties: {},
-      };
-
-      // Recursively convert nested components
-      if (component.components) {
-        for (const nestedComponent of component.components) {
-          const nestedResult = convertComponent(nestedComponent);
-          if (nestedResult && nestedComponent.key) {
-            (propertySchema as JSONSchema7).properties![nestedComponent.key] =
-              nestedResult.propertySchema;
-          }
-        }
-      }
-
-      break;
-    }
-
-    case "dynamiclist": {
-      // Dynamic lists are arrays of objects
-      propertySchema = {
-        type: "array",
-        title: component.label,
-        description: component.description,
-        default: component.defaultValue,
-        items: {
-          type: "object",
-          properties: {},
-        },
-      };
-
-      // Recursively convert nested components
-      if (component.components) {
-        for (const nestedComponent of component.components) {
-          const nestedResult = convertComponent(nestedComponent);
-          if (nestedResult && nestedComponent.key) {
-            ((propertySchema as JSONSchema7).items as JSONSchema7).properties![
-              nestedComponent.key
-            ] = nestedResult.propertySchema;
-          }
-        }
-      }
-
-      break;
-    }
-
-    case "table": {
-      // Tables are arrays of objects with predefined columns
-      propertySchema = {
-        type: "array",
-        title: component.label,
-        description: component.description,
-        items: {
-          type: "object",
-          properties: {},
-        },
-      };
-
-      // Add columns as properties
-      if (component.columns) {
-        const itemProperties: Record<string, JSONSchema7> = {};
-        component.columns.forEach((col) => {
-          itemProperties[col.key] = {
-            type: "string",
-            title: col.label,
-          };
-        });
-        ((propertySchema as JSONSchema7).items as JSONSchema7).properties = itemProperties;
-      }
-
-      // Add table-specific extensions
-      const extensions: Record<string, any> = {};
-      if (component.dataSource) {
-        extensions.dataSource = component.dataSource;
-      }
-      if (component.columnsExpression) {
-        extensions.columnsExpression = component.columnsExpression;
-      }
-      if (Object.keys(extensions).length > 0) {
-        (propertySchema as JSONSchema7)["x-table"] = extensions;
-      }
-
-      break;
-    }
-
-    case "expression": {
-      // Expression fields compute values - treat as any type
-      propertySchema = {
-        title: component.label,
-        description: component.description,
-        readOnly: true,
-        "x-expression": component.expression,
-        "x-computeOn": component.computeOn || "change",
-      };
-      break;
-    }
-
-    // ========================================================================
-    // Display-only components (no schema output)
-    // ========================================================================
-
-    case "text":
-    case "image":
-    case "button":
-    case "spacer":
-    case "separator":
-    case "html":
-    case "iframe":
-      return null;
 
     default:
-      // Unknown component type
-      console.warn(`Unknown component type: ${(component as any).type}`);
-      return null;
+      schema.type = "string";
   }
 
-  // Clean up undefined values
-  cleanSchema(propertySchema as JSONSchema7);
+  // Common properties
+  if (component.label) {
+    schema.title = component.label;
+  }
 
-  return {
-    propertySchema,
-    isRequired,
-    conditionalRules,
-  };
+  if (component.description) {
+    schema.description = component.description;
+  }
+
+  if (component.defaultValue !== undefined) {
+    schema.default = component.defaultValue;
+  }
+
+  if (component.readonly) {
+    schema.readOnly = true;
+  }
+
+  // Extensions
+  if (options.includeExtensions) {
+    if (component.id) schema["x-formjs-id"] = component.id;
+    if (component.conditional)
+      schema["x-formjs-conditional"] = component.conditional;
+    if (component.layout) schema["x-formjs-layout"] = component.layout;
+  }
+
+  return schema;
 }
 
 /**
- * Removes undefined and null values from schema objects
+ * Apply string validation rules
  */
-function cleanSchema(schema: JSONSchema7): void {
-  Object.keys(schema).forEach((key) => {
-    const value = (schema as any)[key];
-    if (value === undefined || value === null) {
-      delete (schema as any)[key];
+function applyStringValidation(
+  schema: JSONSchema,
+  component: FormJsComponent,
+): void {
+  const validate = component.validate;
+  if (!validate) return;
+
+  if (validate.minLength !== undefined) {
+    schema.minLength = validate.minLength;
+  }
+
+  if (validate.maxLength !== undefined) {
+    schema.maxLength = validate.maxLength;
+  }
+
+  if (validate.pattern) {
+    schema.pattern = validate.pattern;
+  }
+
+  if (validate.validationType === "email") {
+    schema.format = "email";
+  }
+}
+
+/**
+ * Apply number validation rules
+ */
+function applyNumberValidation(
+  schema: JSONSchema,
+  component: FormJsComponent,
+): void {
+  const validate = component.validate;
+  if (!validate) return;
+
+  if (validate.min !== undefined) {
+    schema.minimum = validate.min;
+  }
+
+  if (validate.max !== undefined) {
+    schema.maximum = validate.max;
+  }
+}
+
+/**
+ * Apply enum schema for select/radio/checklist/taglist
+ */
+function applyEnumSchema(
+  schema: JSONSchema,
+  component: FormJsComponent,
+  isMultiple: boolean,
+): void {
+  const values = component.values;
+
+  if (isMultiple) {
+    schema.type = "array";
+    schema.uniqueItems = true;
+
+    if (values && values.length > 0) {
+      const enumValues = values.map((v) => v.value);
+      const itemType = inferTypeFromValues(enumValues);
+
+      schema.items = {
+        enum: enumValues,
+        ...(itemType && { type: itemType }),
+      };
+    } else {
+      schema.items = { type: "string" };
     }
-  });
+  } else {
+    if (values && values.length > 0) {
+      const enumValues = values.map((v) => v.value);
+      const itemType = inferTypeFromValues(enumValues);
+
+      schema.enum = enumValues;
+      if (itemType) {
+        schema.type = itemType;
+      }
+    } else {
+      schema.type = "string";
+    }
+  }
+}
+
+/**
+ * Infer type from enum values
+ */
+function inferTypeFromValues(
+  values: unknown[],
+): JSONSchema7TypeName | undefined {
+  const types = new Set<JSONSchema7TypeName>();
+
+  for (const value of values) {
+    if (typeof value === "string") types.add("string");
+    else if (typeof value === "number")
+      types.add(Number.isInteger(value) ? "integer" : "number");
+    else if (typeof value === "boolean") types.add("boolean");
+  }
+
+  if (types.size === 1) {
+    return types.values().next().value;
+  }
+
+  return undefined;
+}
+
+/**
+ * Validate if object is a valid form-js schema
+ */
+export function isFormJsSchema(obj: unknown): obj is FormJsSchema {
+  if (!obj || typeof obj !== "object") return false;
+  const schema = obj as Record<string, unknown>;
+
+  if (!Array.isArray(schema.components)) return false;
+
+  for (const comp of schema.components) {
+    if (!comp || typeof comp !== "object") return false;
+    if (typeof (comp as Record<string, unknown>).type !== "string")
+      return false;
+  }
+
+  return true;
 }

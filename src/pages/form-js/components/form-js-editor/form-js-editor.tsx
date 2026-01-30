@@ -22,12 +22,14 @@ import {
 import SaveIcon from "@mui/icons-material/Save";
 import SchemaIcon from "@mui/icons-material/Schema";
 
-import type { JSONSchema7 } from "json-schema";
-import type { FormSchema } from "../../types";
-import { convertFormJsToJsonSchema } from "@/utils/convert-form-js-to-json-schema/convert-form-js-to-json-schema";
+import {
+  convertToJSONSchema,
+  type JSONSchema,
+  type FormJsSchema,
+} from "@/utils/convert-form-js-to-json-schema";
 
 // Initial schema for the editor
-const defaultSchema: FormSchema = {
+const defaultSchema: FormJsSchema = {
   type: "default",
   id: "Form_1",
   components: [
@@ -53,9 +55,10 @@ const FormJsEditor: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [currentSchema, setCurrentSchema] = useState<FormSchema | null>(null);
-  const [currentJsonSchema, setCurrentJsonSchema] =
-    useState<JSONSchema7 | null>(null);
+  const [currentSchema, setCurrentSchema] = useState<FormJsSchema | null>(null);
+  const [currentJsonSchema, setCurrentJsonSchema] = useState<JSONSchema | null>(
+    null,
+  );
 
   const [schemaDialogOpen, setSchemaDialogOpen] = useState(false);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
@@ -113,7 +116,7 @@ const FormJsEditor: React.FC = () => {
     if (!editorInstanceRef.current) return;
 
     try {
-      const schema = editorInstanceRef.current.saveSchema() as FormSchema;
+      const schema = editorInstanceRef.current.saveSchema() as FormJsSchema;
       setCurrentSchema(schema);
       setCurrentJsonSchema(null);
       setSchemaDialogOpen(true);
@@ -132,8 +135,8 @@ const FormJsEditor: React.FC = () => {
     if (!editorInstanceRef.current) return;
 
     try {
-      const formSchema = editorInstanceRef.current.saveSchema() as FormSchema;
-      const jsonSchema = convertFormJsToJsonSchema(formSchema);
+      const formSchema = editorInstanceRef.current.saveSchema() as FormJsSchema;
+      const jsonSchema = convertToJSONSchema(formSchema);
 
       setCurrentJsonSchema(jsonSchema);
       setCurrentSchema(null);
